@@ -1,5 +1,6 @@
 import os
 import pickle
+import base64
 from datetime import datetime, timezone
 from flask import Flask, request
 from googleapiclient.discovery import build
@@ -58,6 +59,20 @@ def get_gmail_service():
     
     return build('gmail', 'v1', credentials=creds)
 
+def get_message_content(message):
+    # Função para extrair o conteúdo do e-mail, seja ele texto plano ou HTML
+    if 'parts' in message['payload']:
+        parts = message['payload']['parts']
+        for part in parts:
+            if part['mimeType'] in ['text/plain', 'text/html']:
+                if 'data' in part['body']:
+                    return base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+                elif 'attachmentId' in part['body']:
+                    return '[Conteúdo do e-mail está em anexo]'
+    elif 'body' in message['payload'] and 'data' in message['payload']['body']:
+        return base64.urlsafe_b64decode(message['payload']['body']['data']).decode('utf-8')
+    return '[Não foi possível recuperar o conteúdo do e-mail]'
+
 @app.route('/')
 def index():
     service = get_gmail_service()
@@ -82,17 +97,23 @@ def index():
         message = service.users().messages().get(
             userId='me', 
             id=msg['id'],
-            format='metadata',
-            metadataHeaders=['From', 'Subject', 'Date']
+            format='full'
         ).execute()
         
         headers = {h['name']: h['value'] for h in message['payload']['headers']}
+        content = get_message_content(message)
+        
         output.append(f'''
             <div style="border: 1px solid #ccc; padding: 10px; margin: 10px;">
                 <p><strong>De:</strong> {headers.get('From', 'Desconhecido')}</p>
                 <p><strong>Assunto:</strong> {headers.get('Subject', 'Sem assunto')}</p>
                 <p><strong>Data:</strong> {headers.get('Date', 'Data não disponível')}</p>
                 <p><strong>ID:</strong> {msg['id']}</p>
+                <hr>
+                <div style="margin-top: 10px;">
+                    <strong>Conteúdo do E-mail:</strong>
+                    <div style="margin-top: 10px; white-space: pre-wrap;">{content}</div>
+                </div>
             </div>
         ''')
     
